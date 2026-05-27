@@ -9,6 +9,7 @@ export type Database = {
         Row: Product
         Insert: Product
         Update: Partial<Product>
+        Relationships: []
       }
       transactions: {
         Row: Transaction & { id: number; created_at: string }
@@ -17,6 +18,7 @@ export type Database = {
           created_at?: string
         }
         Update: Partial<Transaction>
+        Relationships: []
       }
       cash_reports: {
         Row: CashReport & { id: number; created_at: string }
@@ -25,6 +27,7 @@ export type Database = {
           created_at?: string
         }
         Update: Partial<CashReport>
+        Relationships: []
       }
     }
     Views: Record<string, never>
