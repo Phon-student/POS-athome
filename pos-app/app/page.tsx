@@ -7,9 +7,13 @@ import { calculateDiscount, calculateChange } from '@/lib/discount'
 import {
   getStoredBoothLocation,
   setBoothLocation,
+  clearBoothLocation,
   getStaffName,
   setStaffName,
   clearStaffSession,
+  getAdminPin,
+  hasAdminPin,
+  setAdminPin,
   addOfflineSale,
   getOfflineSales,
   clearOfflineSales,
@@ -27,7 +31,8 @@ type ClosingSummary = {
   expectedCash: number
   transactionCount: number
 }
-type SessionStep = 'loading' | 'staff' | 'booth' | 'ready'
+type SessionStep = 'loading' | 'staff' | 'adminSetup' | 'booth' | 'ready'
+type AdminPinTarget = 'settings' | 'boothSetup' | 'boothSwitch'
 
 const DENOMS = [
   { label: '+20',   value: 20,   color: 'bg-green-100 text-green-800 border-green-300' },
@@ -224,6 +229,10 @@ export default function POSPage() {
   const [staffInput, setStaffInput] = useState('')
   const [sessionStep, setSessionStep] = useState<SessionStep>('loading')
   const [sessionError, setSessionError] = useState('')
+  const [adminPinInput, setAdminPinInput] = useState('')
+  const [adminPinConfirm, setAdminPinConfirm] = useState('')
+  const [adminPinError, setAdminPinError] = useState('')
+  const [adminPinTarget, setAdminPinTarget] = useState<AdminPinTarget | null>(null)
   const [offlineCount, setOfflineCount] = useState(0)
   const [screen, setScreen]         = useState<Screen>('pos')
   const [floatType, setFloatType]   = useState<FloatType>('OPENING')
@@ -241,6 +250,7 @@ export default function POSPage() {
   useEffect(() => {
     const storedStaffName = getStaffName().trim()
     const storedBooth = getStoredBoothLocation()
+    const adminPinExists = hasAdminPin()
 
     if (storedStaffName) {
       setStaffNameState(storedStaffName)
@@ -248,11 +258,11 @@ export default function POSPage() {
       if (storedBooth) {
         setBooth(storedBooth)
         setSessionStep('ready')
-      } else if (storedAdminPin) {
-        setSessionStep('ready')
+      } else if (adminPinExists) {
+        setSessionStep('staff')
         setAdminPinTarget('boothSetup')
       } else {
-        setSessionStep('booth')
+        setSessionStep('adminSetup')
       }
     } else {
       setSessionStep('staff')
@@ -302,15 +312,103 @@ export default function POSPage() {
     setStaffName(nextStaffName)
     setStaffNameState(nextStaffName)
     setSessionError('')
-    setSessionStep('booth')
+
+    if (hasAdminPin()) {
+      const storedBooth = getStoredBoothLocation()
+      if (storedBooth) {
+        setBooth(storedBooth)
+        setSessionStep('ready')
+      } else {
+        setAdminPinTarget('boothSetup')
+      }
+    } else {
+      setSessionStep('adminSetup')
+    }
   }
 
   const chooseBooth = (nextBooth: string) => {
     setBooth(nextBooth)
     setBoothLocation(nextBooth)
     setSessionError('')
+    setAdminPinTarget(null)
     setSessionStep('ready')
     showToast(`Signed in as ${staffName} at ${nextBooth}`)
+  }
+
+  const submitAdminSetup = (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+    const pin = adminPinInput.trim()
+    const confirmPin = adminPinConfirm.trim()
+
+    if (pin.length < 4) {
+      setAdminPinError('Use at least 4 digits for the admin PIN')
+      return
+    }
+
+    if (!/^\d+$/.test(pin)) {
+      setAdminPinError('Admin PIN should contain numbers only')
+      return
+    }
+
+    if (pin !== confirmPin) {
+      setAdminPinError('Admin PIN confirmation does not match')
+      return
+    }
+
+    setAdminPin(pin)
+    setAdminPinInput('')
+    setAdminPinConfirm('')
+    setAdminPinError('')
+    setSessionStep('booth')
+    showToast('Admin PIN saved for this device')
+  }
+
+  const openAdminPinPrompt = (target: AdminPinTarget) => {
+    setAdminPinTarget(target)
+    setAdminPinInput('')
+    setAdminPinConfirm('')
+    setAdminPinError('')
+  }
+
+  const closeAdminPinPrompt = () => {
+    setAdminPinTarget(null)
+    setAdminPinInput('')
+    setAdminPinConfirm('')
+    setAdminPinError('')
+  }
+
+  const submitAdminPin = (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+    const currentPin = getAdminPin()
+    if (!currentPin) {
+      setAdminPinError('Set an admin PIN first')
+      setSessionStep('adminSetup')
+      return
+    }
+
+    if (adminPinInput.trim() !== currentPin) {
+      setAdminPinError('Incorrect admin PIN')
+      return
+    }
+
+    const target = adminPinTarget
+    closeAdminPinPrompt()
+
+    if (target === 'settings') {
+      setScreen('settings')
+      return
+    }
+
+    if (target === 'boothSetup') {
+      setSessionStep('booth')
+      return
+    }
+
+    if (target === 'boothSwitch') {
+      clearBoothLocation()
+      setBooth('')
+      setSessionStep('booth')
+    }
   }
 
   const signOutStaff = () => {
@@ -319,6 +417,7 @@ export default function POSPage() {
     setStaffInput('')
     setBooth('')
     setSessionError('')
+    closeAdminPinPrompt()
     setSessionStep('staff')
     setScreen('pos')
     setPayStep('idle')
@@ -326,13 +425,6 @@ export default function POSPage() {
     setFloatDenoms({})
     setClosingSummary(null)
     setClosingSummaryError('')
-  }
-
-  const swapBooth = () => {
-    const next = booth === 'Booth_A' ? 'Booth_B' : 'Booth_A'
-    setBooth(next)
-    setBoothLocation(next)
-    showToast(`Switched to ${next}`)
   }
 
   // ── Cart ─────────────────────────────────────────────────
@@ -575,6 +667,55 @@ export default function POSPage() {
     )
   }
 
+  if (sessionStep === 'adminSetup') {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center px-4 py-8">
+        <form onSubmit={submitAdminSetup} className="w-full max-w-md rounded-3xl bg-white border border-[var(--border)] p-6 md:p-8 shadow-sm space-y-5">
+          <div>
+            <div className="font-display text-3xl text-[var(--ink)] mb-2">Admin PIN Setup</div>
+            <p className="text-sm text-[var(--muted)]">Create the shop admin PIN for this device before assigning its booth.</p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="admin-pin" className="text-sm font-semibold text-[var(--ink)]">New admin PIN</label>
+            <input
+              id="admin-pin"
+              type="password"
+              inputMode="numeric"
+              value={adminPinInput}
+              onChange={e => setAdminPinInput(e.target.value)}
+              placeholder="4 digits or more"
+              className="w-full rounded-2xl border-2 border-[var(--border)] bg-[var(--paper)] px-4 py-3 outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="admin-pin-confirm" className="text-sm font-semibold text-[var(--ink)]">Confirm admin PIN</label>
+            <input
+              id="admin-pin-confirm"
+              type="password"
+              inputMode="numeric"
+              value={adminPinConfirm}
+              onChange={e => setAdminPinConfirm(e.target.value)}
+              placeholder="Re-enter PIN"
+              className="w-full rounded-2xl border-2 border-[var(--border)] bg-[var(--paper)] px-4 py-3 outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+
+          {adminPinError && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {adminPinError}
+            </div>
+          )}
+
+          <button type="submit" className="w-full rounded-2xl bg-[var(--ink)] py-3 text-white font-display text-lg tap-scale">
+            Save PIN and Continue
+          </button>
+        </form>
+      </div>
+    )
+  }
+
   if (sessionStep === 'booth') {
     return (
       <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center px-4 py-8">
@@ -624,10 +765,16 @@ export default function POSPage() {
               <div>
                 <h3 className="font-display text-base mb-1">Staff Session</h3>
                 <p className="text-xs text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span> on <span className="font-semibold text-[var(--ink)]">{booth}</span>.</p>
+                <p className="text-[11px] text-[var(--muted)] mt-1">This device is locked to its booth. Use Change Booth only when reassigning this machine.</p>
               </div>
-              <button onClick={signOutStaff} className="rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold tap-scale">
-                Sign Out
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => openAdminPinPrompt('boothSwitch')} className="rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold tap-scale">
+                  Change Booth
+                </button>
+                <button onClick={signOutStaff} className="rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold tap-scale">
+                  Sign Out
+                </button>
+              </div>
             </div>
           </section>
 
@@ -942,10 +1089,9 @@ export default function POSPage() {
 
       {/* ── HEADER ── */}
       <header className="bg-[var(--ink)] text-white px-3 py-2.5 flex items-center gap-2 shrink-0">
-        <button onClick={swapBooth}
-          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-3 py-1.5 text-sm font-semibold tap-scale">
-          🔄 <span className="font-display">{booth}</span>
-        </button>
+        <div className="flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm font-semibold">
+          🏷️ <span className="font-display">{booth}</span>
+        </div>
 
         <div className="flex-1 text-center font-display text-sm tracking-wide opacity-60">{staffName}</div>
 
@@ -958,7 +1104,7 @@ export default function POSPage() {
             </button>
           )}
           <button onClick={() => setScreen('float')} className="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-xs font-semibold tap-scale hover:bg-white/20">💰 Float</button>
-          <button onClick={() => setScreen('settings')} className="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-xs font-semibold tap-scale hover:bg-white/20">⚙️</button>
+          <button onClick={() => openAdminPinPrompt('settings')} className="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-xs font-semibold tap-scale hover:bg-white/20">⚙️</button>
         </div>
       </header>
 
@@ -1144,6 +1290,45 @@ export default function POSPage() {
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[var(--ink)] text-white px-5 py-3 rounded-2xl text-sm font-semibold slide-up shadow-xl z-50 whitespace-nowrap">
           {toast}
+        </div>
+      )}
+
+      {adminPinTarget && (
+        <div className="fixed inset-0 z-50 bg-black/35 flex items-center justify-center px-4">
+          <form onSubmit={submitAdminPin} className="w-full max-w-sm rounded-3xl bg-white border border-[var(--border)] p-6 shadow-xl space-y-4">
+            <div>
+              <div className="font-display text-2xl text-[var(--ink)] mb-2">Admin PIN Required</div>
+              <p className="text-sm text-[var(--muted)]">
+                {adminPinTarget === 'settings' && 'Enter the admin PIN to open setup and import.'}
+                {adminPinTarget === 'boothSetup' && 'Enter the admin PIN to assign this device to a booth.'}
+                {adminPinTarget === 'boothSwitch' && 'Enter the admin PIN to change this device booth.'}
+              </p>
+            </div>
+
+            <input
+              type="password"
+              inputMode="numeric"
+              value={adminPinInput}
+              onChange={e => setAdminPinInput(e.target.value)}
+              placeholder="Admin PIN"
+              className="w-full rounded-2xl border-2 border-[var(--border)] bg-[var(--paper)] px-4 py-3 outline-none focus:border-[var(--accent)]"
+            />
+
+            {adminPinError && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {adminPinError}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button type="button" onClick={closeAdminPinPrompt} className="flex-1 rounded-2xl border border-[var(--border)] py-3 text-sm font-semibold tap-scale">
+                Cancel
+              </button>
+              <button type="submit" className="flex-1 rounded-2xl bg-[var(--ink)] py-3 text-white text-sm font-semibold tap-scale">
+                Verify
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
