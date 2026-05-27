@@ -414,6 +414,7 @@ export default function POSPage() {
 
   const signOutStaff = () => {
     clearStaffSession()
+    clearBoothLocation()
     setStaffNameState('')
     setStaffInput('')
     setBooth('')
