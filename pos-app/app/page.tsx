@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import type { Database } from '@/lib/supabase'
 import { Product, CartItem } from '@/lib/supabase'
 import { calculateDiscount, calculateChange } from '@/lib/discount'
 import {
@@ -14,6 +15,9 @@ import {
 type PayStep = 'idle' | 'promptpay' | 'cash'
 type Screen = 'pos' | 'float' | 'settings'
 type FloatType = 'OPENING' | 'CLOSING'
+type TransactionInsert = Database['public']['Tables']['transactions']['Insert']
+type CashReportInsert = Database['public']['Tables']['cash_reports']['Insert']
+type TransactionMetadata = TransactionInsert['metadata']
 
 const DENOMS = [
   { label: '+20',   value: 20,   color: 'bg-green-100 text-green-800 border-green-300' },
@@ -236,8 +240,8 @@ export default function POSPage() {
   const { change, breakdown } = calculateChange(total, cashIn)
 
   // ── Record sale ──────────────────────────────────────────
-  const recordSale = useCallback(async (method: 'PromptPay' | 'Cash', meta: Record<string, unknown>) => {
-    const tx = {
+  const recordSale = useCallback(async (method: 'PromptPay' | 'Cash', meta: TransactionMetadata) => {
+    const tx: TransactionInsert = {
       booth_location: booth,
       payment_method: method,
       subtotal, discount,
@@ -285,7 +289,12 @@ export default function POSPage() {
   // ── Float ────────────────────────────────────────────────
   const floatTotal = FLOAT_DENOMS.reduce((s, d) => s + (floatDenoms[d.key] || 0) * d.value, 0)
   const submitFloat = async () => {
-    const report = { booth_location: booth, report_type: floatType, total_value: floatTotal, denomination_breakdown: floatDenoms }
+    const report: CashReportInsert = {
+      booth_location: booth,
+      report_type: floatType,
+      total_value: floatTotal,
+      denomination_breakdown: floatDenoms,
+    }
     try {
       const res = await fetch('/api/cash-report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) })
       if (!res.ok) throw new Error()

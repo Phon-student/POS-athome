@@ -42,20 +42,29 @@ let supabaseClient: SupabaseClient<Database> | null = null
 const SUPABASE_ENV_HINT =
   'Supabase is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY) in Vercel Environment Variables.'
 
+type RuntimeEnv = Record<string, string | undefined>
+
+function getRuntimeEnv(): RuntimeEnv {
+  const maybeProcess = (globalThis as { process?: { env?: RuntimeEnv } }).process
+  return maybeProcess?.env ?? {}
+}
+
 function resolveSupabaseUrl() {
+  const env = getRuntimeEnv()
   return (
-    process.env.SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_PROJECT_URL
+    env.SUPABASE_URL ||
+    env.NEXT_PUBLIC_SUPABASE_URL ||
+    env.SUPABASE_PROJECT_URL
   )
 }
 
 function resolveSupabaseKey() {
+  const env = getRuntimeEnv()
   return (
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    env.SUPABASE_ANON_KEY ||
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    env.SUPABASE_PUBLISHABLE_KEY ||
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   )
 }
 

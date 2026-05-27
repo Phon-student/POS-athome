@@ -29,7 +29,13 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const booth = searchParams.get('booth')
-  const type = searchParams.get('type') || 'CLOSING'
+  if (!booth) {
+    return NextResponse.json({ error: 'Missing required query param: booth' }, { status: 400 })
+  }
+
+  const typeParam = searchParams.get('type')
+  const type: Database['public']['Tables']['cash_reports']['Row']['report_type'] =
+    typeParam === 'OPENING' ? 'OPENING' : 'CLOSING'
 
   const { data, error } = await supabase
     .from('cash_reports')
