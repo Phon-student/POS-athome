@@ -16,6 +16,14 @@ export async function GET() {
     .select('*')
     .order('category')
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  if (error) {
+    console.error('Failed to load products from Supabase:', error)
+    return NextResponse.json([], {
+      headers: {
+        'x-pos-warning': `Supabase products query failed: ${error.message}`,
+      },
+    })
+  }
+
+  return NextResponse.json(data ?? [])
 }
