@@ -5,8 +5,11 @@ import type { Database } from '@/lib/supabase'
 import { Product, CartItem } from '@/lib/supabase'
 import { calculateDiscount, calculateChange } from '@/lib/discount'
 import {
-  getBoothLocation,
+  getStoredBoothLocation,
   setBoothLocation,
+  getStaffName,
+  setStaffName,
+  clearStaffSession,
   addOfflineSale,
   getOfflineSales,
   clearOfflineSales,
@@ -24,6 +27,7 @@ type ClosingSummary = {
   expectedCash: number
   transactionCount: number
 }
+type SessionStep = 'loading' | 'staff' | 'booth' | 'ready'
 
 const DENOMS = [
   { label: '+20',   value: 20,   color: 'bg-green-100 text-green-800 border-green-300' },
@@ -215,7 +219,11 @@ export default function POSPage() {
   const [cart, setCart]             = useState<CartItem[]>([])
   const [payStep, setPayStep]       = useState<PayStep>('idle')
   const [cashIn, setCashIn]         = useState(0)
-  const [booth, setBooth]           = useState('Booth_A')
+  const [booth, setBooth]           = useState('')
+  const [staffName, setStaffNameState] = useState('')
+  const [staffInput, setStaffInput] = useState('')
+  const [sessionStep, setSessionStep] = useState<SessionStep>('loading')
+  const [sessionError, setSessionError] = useState('')
   const [offlineCount, setOfflineCount] = useState(0)
   const [screen, setScreen]         = useState<Screen>('pos')
   const [floatType, setFloatType]   = useState<FloatType>('OPENING')
@@ -231,7 +239,25 @@ export default function POSPage() {
   const qrRef    = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    setBooth(getBoothLocation())
+    const storedStaffName = getStaffName().trim()
+    const storedBooth = getStoredBoothLocation()
+
+    if (storedStaffName) {
+      setStaffNameState(storedStaffName)
+      setStaffInput(storedStaffName)
+      if (storedBooth) {
+        setBooth(storedBooth)
+        setSessionStep('ready')
+      } else if (storedAdminPin) {
+        setSessionStep('ready')
+        setAdminPinTarget('boothSetup')
+      } else {
+        setSessionStep('booth')
+      }
+    } else {
+      setSessionStep('staff')
+    }
+
     setOfflineCount(getOfflineSales().length)
     setPromo(loadLocalPromo())
     setQrImage(loadQR())
@@ -263,6 +289,43 @@ export default function POSPage() {
   const showToast = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 2800)
+  }
+
+  const submitStaffLogin = (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+    const nextStaffName = staffInput.trim()
+    if (!nextStaffName) {
+      setSessionError('Enter a staff name to continue')
+      return
+    }
+
+    setStaffName(nextStaffName)
+    setStaffNameState(nextStaffName)
+    setSessionError('')
+    setSessionStep('booth')
+  }
+
+  const chooseBooth = (nextBooth: string) => {
+    setBooth(nextBooth)
+    setBoothLocation(nextBooth)
+    setSessionError('')
+    setSessionStep('ready')
+    showToast(`Signed in as ${staffName} at ${nextBooth}`)
+  }
+
+  const signOutStaff = () => {
+    clearStaffSession()
+    setStaffNameState('')
+    setStaffInput('')
+    setBooth('')
+    setSessionError('')
+    setSessionStep('staff')
+    setScreen('pos')
+    setPayStep('idle')
+    setCashIn(0)
+    setFloatDenoms({})
+    setClosingSummary(null)
+    setClosingSummaryError('')
   }
 
   const swapBooth = () => {
@@ -298,7 +361,7 @@ export default function POSPage() {
       subtotal, discount,
       total_amount: total,
       items: cart.map(i => ({ id: i.product.id, qty: i.qty, price_at_sale: i.product.price })),
-      metadata: meta,
+      metadata: { staff_name: staffName, ...meta },
     }
     try {
       const res = await fetch('/api/record-sale', {
@@ -315,7 +378,7 @@ export default function POSPage() {
       showToast(`⚠️ Saved offline (${count} pending)`)
     }
     clearCart()
-  }, [booth, cart, subtotal, discount, total])
+  }, [booth, cart, staffName, subtotal, discount, total])
 
   // ── Sync offline ─────────────────────────────────────────
   const syncOffline = async () => {
@@ -465,6 +528,83 @@ export default function POSPage() {
   const categoryOrder = ['beverage', 'bakery']
   const grouped = categoryOrder.map(cat => ({ cat, items: products.filter(p => p.category === cat) }))
 
+  if (sessionStep === 'loading') {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center px-6">
+        <div className="w-full max-w-sm rounded-3xl bg-white border border-[var(--border)] p-8 text-center shadow-sm">
+          <div className="font-display text-3xl text-[var(--ink)] mb-2">Booth POS</div>
+          <p className="text-sm text-[var(--muted)]">Loading staff session…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (sessionStep === 'staff') {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center px-4 py-8">
+        <form onSubmit={submitStaffLogin} className="w-full max-w-md rounded-3xl bg-white border border-[var(--border)] p-6 md:p-8 shadow-sm space-y-5">
+          <div>
+            <div className="font-display text-3xl text-[var(--ink)] mb-2">Staff Sign In</div>
+            <p className="text-sm text-[var(--muted)]">Enter the staff name first. The next step will assign this device to a booth.</p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="staff-name" className="text-sm font-semibold text-[var(--ink)]">Staff name</label>
+            <input
+              id="staff-name"
+              type="text"
+              value={staffInput}
+              onChange={e => setStaffInput(e.target.value)}
+              placeholder="Aom, Bee, Cashier 1"
+              autoComplete="name"
+              className="w-full rounded-2xl border-2 border-[var(--border)] bg-[var(--paper)] px-4 py-3 outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+
+          {sessionError && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {sessionError}
+            </div>
+          )}
+
+          <button type="submit" className="w-full rounded-2xl bg-[var(--ink)] py-3 text-white font-display text-lg tap-scale">
+            Continue to Booth Selection
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  if (sessionStep === 'booth') {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-md rounded-3xl bg-white border border-[var(--border)] p-6 md:p-8 shadow-sm space-y-5">
+          <div>
+            <div className="font-display text-3xl text-[var(--ink)] mb-2">Choose Booth</div>
+            <p className="text-sm text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span>. Pick the booth for this machine.</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {['Booth_A', 'Booth_B'].map(option => (
+              <button
+                key={option}
+                onClick={() => chooseBooth(option)}
+                className="rounded-2xl border-2 border-[var(--border)] bg-[var(--paper)] px-5 py-5 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent-light)] tap-scale"
+              >
+                <div className="font-display text-2xl text-[var(--ink)]">{option.replace('_', ' ')}</div>
+                <div className="text-sm text-[var(--muted)] mt-1">Use this booth for all sales and float reports on this device.</div>
+              </button>
+            ))}
+          </div>
+
+          <button onClick={() => setSessionStep('staff')} className="w-full rounded-2xl border border-[var(--border)] py-3 text-sm font-semibold tap-scale">
+            Back to Staff Sign In
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // ─────────────────────────────────────────────────────────
   // ── SETTINGS SCREEN ──────────────────────────────────────
   // ─────────────────────────────────────────────────────────
@@ -478,6 +618,18 @@ export default function POSPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 max-w-lg mx-auto w-full space-y-6">
+
+          <section className="bg-white rounded-2xl border border-[var(--border)] p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-display text-base mb-1">Staff Session</h3>
+                <p className="text-xs text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span> on <span className="font-semibold text-[var(--ink)]">{booth}</span>.</p>
+              </div>
+              <button onClick={signOutStaff} className="rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold tap-scale">
+                Sign Out
+              </button>
+            </div>
+          </section>
 
           {/* ── Import Products ─────────────── */}
           <section className="bg-white rounded-2xl border border-[var(--border)] p-5">
@@ -643,7 +795,7 @@ export default function POSPage() {
       <div className="min-h-screen bg-[var(--paper)] flex flex-col">
         <header className="bg-[var(--ink)] text-white px-4 py-3 flex items-center gap-3">
           <button onClick={() => setScreen('pos')} className="text-white/60 hover:text-white text-sm px-3 py-1.5 rounded-lg border border-white/20 tap-scale">← Back</button>
-          <span className="font-display text-lg flex-1 text-center">{booth}</span>
+          <span className="font-display text-lg flex-1 text-center">{booth} · {staffName}</span>
           <div className="w-16" />
         </header>
 
@@ -795,7 +947,7 @@ export default function POSPage() {
           🔄 <span className="font-display">{booth}</span>
         </button>
 
-        <div className="flex-1 text-center font-display text-sm tracking-wide opacity-60">BOOTH POS</div>
+        <div className="flex-1 text-center font-display text-sm tracking-wide opacity-60">{staffName}</div>
 
         <div className="flex gap-2">
           {offlineCount > 0 && (
