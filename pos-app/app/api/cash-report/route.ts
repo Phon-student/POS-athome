@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseServerClient } from '@/lib/supabase'
 
 export async function POST(req: NextRequest) {
+  const supabase = getSupabaseServerClient()
+  if (!supabase) {
+    return NextResponse.json(
+      { error: 'Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.' },
+      { status: 500 }
+    )
+  }
+
   const body = await req.json()
 
   const { data, error } = await supabase
@@ -16,6 +24,14 @@ export async function POST(req: NextRequest) {
 
 // GET /api/cash-report?booth=Booth_A&type=CLOSING&last=true
 export async function GET(req: NextRequest) {
+  const supabase = getSupabaseServerClient()
+  if (!supabase) {
+    return NextResponse.json(
+      { error: 'Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.' },
+      { status: 500 }
+    )
+  }
+
   const { searchParams } = new URL(req.url)
   const booth = searchParams.get('booth')
   const type = searchParams.get('type') || 'CLOSING'
