@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --ink: #0f0f0f;
+  --paper: #faf9f6;
+  --accent: #ff5c00;
+  --accent-light: #fff0e8;
+  --success: #00a86b;
+  --success-light: #e6f7f1;
+  --muted: #6b6b6b;
+  --border: #e2e0db;
+  --card: #ffffff;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Touch targets */
+button {
+  min-height: 48px;
+  cursor: pointer;
+}
+
+/* Smooth tap feedback */
+.tap-scale {
+  transition: transform 0.08s ease, opacity 0.08s ease;
+}
+.tap-scale:active {
+  transform: scale(0.96);
+  opacity: 0.85;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Badge pulse for offline */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+
+/* Slide up animation */
+@keyframes slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.slide-up { animation: slide-up 0.2s ease forwards; }
