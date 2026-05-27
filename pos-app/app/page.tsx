@@ -6,6 +6,8 @@ import { Product, CartItem } from '@/lib/supabase'
 import { calculateDiscount, calculateChange } from '@/lib/discount'
 import {
   getStoredBoothLocation,
+  getStoredShopId,
+  setShopId,
   setBoothLocation,
   clearBoothLocation,
   getStaffName,
@@ -31,7 +33,7 @@ type ClosingSummary = {
   expectedCash: number
   transactionCount: number
 }
-type SessionStep = 'loading' | 'staff' | 'adminSetup' | 'booth' | 'ready'
+type SessionStep = 'loading' | 'staff' | 'shop' | 'adminSetup' | 'booth' | 'ready'
 type AdminPinTarget = 'settings' | 'boothSetup' | 'boothSwitch'
 
 const DENOMS = [
@@ -71,6 +73,7 @@ function isProduct(value: unknown): value is Product {
   const candidate = value as Record<string, unknown>
   return (
     typeof candidate.id === 'string' &&
+    (typeof candidate.shop_id === 'string' || typeof candidate.shop_id === 'undefined') &&
     typeof candidate.name === 'string' &&
     typeof candidate.price === 'number' &&
     typeof candidate.category === 'string'
@@ -183,6 +186,7 @@ async function fetchSheetsData(url: string): Promise<{ products: Product[]; prom
     .filter(r => r['id'] && r['name'] && r['price'])
     .map(r => ({
       id:       r['id'].trim(),
+      shop_id:  '',
       name:     r['name'].trim(),
       price:    parseFloat(r['price']),
       category: (r['category'] || 'beverage').trim().toLowerCase(),
@@ -225,8 +229,10 @@ export default function POSPage() {
   const [payStep, setPayStep]       = useState<PayStep>('idle')
   const [cashIn, setCashIn]         = useState(0)
   const [booth, setBooth]           = useState('')
+  const [shopId, setShopIdState]    = useState('')
   const [staffName, setStaffNameState] = useState('')
   const [staffInput, setStaffInput] = useState('')
+  const [shopInput, setShopInput]   = useState('')
   const [sessionStep, setSessionStep] = useState<SessionStep>('loading')
   const [sessionError, setSessionError] = useState('')
   const [adminPinInput, setAdminPinInput] = useState('')
@@ -249,20 +255,27 @@ export default function POSPage() {
 
   useEffect(() => {
     const storedStaffName = getStaffName().trim()
+    const storedShopId = getStoredShopId()?.trim() || ''
     const storedBooth = getStoredBoothLocation()
     const adminPinExists = hasAdminPin()
 
     if (storedStaffName) {
       setStaffNameState(storedStaffName)
       setStaffInput(storedStaffName)
-      if (storedBooth) {
-        setBooth(storedBooth)
-        setSessionStep('ready')
+      if (!storedShopId) {
+        setSessionStep('shop')
       } else {
-        if (adminPinExists) {
-          setSessionStep('booth')
+        setShopIdState(storedShopId)
+        setShopInput(storedShopId)
+        if (storedBooth) {
+          setBooth(storedBooth)
+          setSessionStep('ready')
         } else {
-          setSessionStep('adminSetup')
+          if (adminPinExists) {
+            setSessionStep('booth')
+          } else {
+            setSessionStep('adminSetup')
+          }
         }
       }
     } else {
@@ -273,29 +286,40 @@ export default function POSPage() {
     setPromo(loadLocalPromo())
     setQrImage(loadQR())
     setSheetsUrl(localStorage.getItem(LOCAL_SHEETS_URL_KEY) || '')
-    // Load products: localStorage first, then API
+  }, [])
+
+  useEffect(() => {
+    if (!shopId) {
+      setProducts([])
+      return
+    }
+
     const local = loadLocalProducts()
     if (local && local.length > 0) {
-      setProducts(local)
-    } else {
-      fetch('/api/products', { cache: 'no-store' })
-        .then(async r => {
-          const payload: unknown = await r.json().catch(() => null)
-          if (!r.ok || !isProductArray(payload)) {
-            throw new Error('Could not load products')
-          }
-          return payload
-        })
-        .then((data: Product[]) => {
-          setProducts(data)
-          saveLocalProducts(data)
-        })
-        .catch(() => {
-          setProducts([])
-          showToast('Could not load products. Import a menu or check the products API.')
-        })
+      const scopedLocal = local.filter(product => !product.shop_id || product.shop_id === shopId)
+      if (scopedLocal.length > 0) {
+        setProducts(scopedLocal)
+      }
     }
-  }, [])
+
+    const query = new URLSearchParams({ shop_id: shopId })
+    fetch(`/api/products?${query.toString()}`, { cache: 'no-store' })
+      .then(async r => {
+        const payload: unknown = await r.json().catch(() => null)
+        if (!r.ok || !isProductArray(payload)) {
+          throw new Error('Could not load products')
+        }
+        return payload
+      })
+      .then((data: Product[]) => {
+        setProducts(data)
+        saveLocalProducts(data)
+      })
+      .catch(() => {
+        setProducts([])
+        showToast('Could not load products. Import a menu or check the products API.')
+      })
+  }, [shopId])
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -314,6 +338,15 @@ export default function POSPage() {
     setStaffNameState(nextStaffName)
     setSessionError('')
 
+    const storedShopId = getStoredShopId()?.trim() || ''
+    if (!storedShopId) {
+      setSessionStep('shop')
+      return
+    }
+
+    setShopIdState(storedShopId)
+    setShopInput(storedShopId)
+
     if (hasAdminPin()) {
       const storedBooth = getStoredBoothLocation()
       if (storedBooth) {
@@ -327,13 +360,32 @@ export default function POSPage() {
     }
   }
 
+  const submitShopSelection = (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+    const nextShopId = shopInput.trim().toUpperCase()
+    if (!nextShopId) {
+      setSessionError('Enter a shop ID to continue')
+      return
+    }
+
+    setShopId(nextShopId)
+    setShopIdState(nextShopId)
+    setSessionError('')
+
+    if (hasAdminPin()) {
+      setSessionStep('booth')
+    } else {
+      setSessionStep('adminSetup')
+    }
+  }
+
   const chooseBooth = (nextBooth: string) => {
     setBooth(nextBooth)
     setBoothLocation(nextBooth)
     setSessionError('')
     setAdminPinTarget(null)
     setSessionStep('ready')
-    showToast(`Signed in as ${staffName} at ${nextBooth}`)
+    showToast(`Signed in as ${staffName} at ${shopId} / ${nextBooth}`)
   }
 
   const submitAdminSetup = (event?: React.FormEvent<HTMLFormElement>) => {
@@ -417,6 +469,8 @@ export default function POSPage() {
     clearBoothLocation()
     setStaffNameState('')
     setStaffInput('')
+    setShopIdState('')
+    setShopInput('')
     setBooth('')
     setSessionError('')
     closeAdminPinPrompt()
@@ -450,6 +504,7 @@ export default function POSPage() {
   // ── Record sale ──────────────────────────────────────────
   const recordSale = useCallback(async (method: 'PromptPay' | 'Cash', meta: TransactionMetadata) => {
     const tx: TransactionInsert = {
+      shop_id: shopId,
       booth_location: booth,
       payment_method: method,
       subtotal, discount,
@@ -472,7 +527,7 @@ export default function POSPage() {
       showToast(`⚠️ Saved offline (${count} pending)`)
     }
     clearCart()
-  }, [booth, cart, staffName, subtotal, discount, total])
+  }, [booth, cart, shopId, staffName, subtotal, discount, total])
 
   // ── Sync offline ─────────────────────────────────────────
   const syncOffline = async () => {
@@ -505,6 +560,7 @@ export default function POSPage() {
     const { start, end } = getLocalDayRange()
     const boothQuery = encodeURIComponent(booth)
     const salesQuery = new URLSearchParams({
+      shop_id: shopId,
       booth,
       payment_method: 'Cash',
       start,
@@ -513,7 +569,7 @@ export default function POSPage() {
 
     try {
       const [openingRes, salesRes] = await Promise.all([
-        fetch(`/api/cash-report?booth=${boothQuery}&type=OPENING`),
+        fetch(`/api/cash-report?shop_id=${encodeURIComponent(shopId)}&booth=${boothQuery}&type=OPENING`),
         fetch(`/api/record-sale?${salesQuery.toString()}`),
       ])
 
@@ -545,9 +601,10 @@ export default function POSPage() {
     }
 
     setClosingSummaryLoading(false)
-  }, [booth])
+  }, [booth, shopId])
   const submitFloat = async () => {
     const report: CashReportInsert = {
+      shop_id: shopId,
       booth_location: booth,
       report_type: floatType,
       total_value: floatTotal,
@@ -563,7 +620,7 @@ export default function POSPage() {
   }
   const autofillYesterday = async () => {
     try {
-      const res = await fetch(`/api/cash-report?booth=${booth}&type=CLOSING`)
+      const res = await fetch(`/api/cash-report?shop_id=${encodeURIComponent(shopId)}&booth=${encodeURIComponent(booth)}&type=CLOSING`)
       if (!res.ok) throw new Error()
       const data = await res.json()
       setFloatDenoms(data.denomination_breakdown || {})
@@ -585,18 +642,22 @@ export default function POSPage() {
       localStorage.setItem(LOCAL_SHEETS_URL_KEY, sheetsUrl.trim())
       const { products: newProds, promo: newPromo } = await fetchSheetsData(sheetsUrl.trim())
       if (newProds.length === 0) { setImportMsg('⚠️ No products found. Check column headers: id, name, price, category'); setImporting(false); return }
-      setProducts(newProds)
-      saveLocalProducts(newProds)
+      const scopedProducts = newProds.map(product => ({ ...product, shop_id: shopId }))
+      setProducts(scopedProducts)
+      saveLocalProducts(scopedProducts)
       fetch('/api/import-products', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProds),
+        body: JSON.stringify({
+          shop_id: shopId,
+          products: scopedProducts,
+        }),
       }).catch(() => {})
       if (newPromo) {
         setPromo(newPromo)
         saveLocalPromo(newPromo)
-        setImportMsg(`✓ Imported ${newProds.length} products + promo config`)
+        setImportMsg(`✓ Imported ${scopedProducts.length} products + promo config`)
       } else {
-        setImportMsg(`✓ Imported ${newProds.length} products`)
+        setImportMsg(`✓ Imported ${scopedProducts.length} products`)
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -662,7 +723,43 @@ export default function POSPage() {
           )}
 
           <button type="submit" className="w-full rounded-2xl bg-[var(--ink)] py-3 text-white font-display text-lg tap-scale">
-            Continue to Booth Selection
+            Continue
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  if (sessionStep === 'shop') {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center px-4 py-8">
+        <form onSubmit={submitShopSelection} className="w-full max-w-md rounded-3xl bg-white border border-[var(--border)] p-6 md:p-8 shadow-sm space-y-5">
+          <div>
+            <div className="font-display text-3xl text-[var(--ink)] mb-2">Select Shop</div>
+            <p className="text-sm text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span>. Enter shop code before booth setup.</p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="shop-id" className="text-sm font-semibold text-[var(--ink)]">Shop ID</label>
+            <input
+              id="shop-id"
+              type="text"
+              value={shopInput}
+              onChange={e => setShopInput(e.target.value)}
+              placeholder="SHOP_A"
+              autoCapitalize="characters"
+              className="w-full rounded-2xl border-2 border-[var(--border)] bg-[var(--paper)] px-4 py-3 outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+
+          {sessionError && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {sessionError}
+            </div>
+          )}
+
+          <button type="submit" className="w-full rounded-2xl bg-[var(--ink)] py-3 text-white font-display text-lg tap-scale">
+            Continue to Security Setup
           </button>
         </form>
       </div>
@@ -724,7 +821,7 @@ export default function POSPage() {
         <div className="w-full max-w-md rounded-3xl bg-white border border-[var(--border)] p-6 md:p-8 shadow-sm space-y-5">
           <div>
             <div className="font-display text-3xl text-[var(--ink)] mb-2">Choose Booth</div>
-            <p className="text-sm text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span>. Pick the booth for this machine.</p>
+            <p className="text-sm text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span> for <span className="font-semibold text-[var(--ink)]">{shopId}</span>. Pick the booth for this machine.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-3">
@@ -766,7 +863,7 @@ export default function POSPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-display text-base mb-1">Staff Session</h3>
-                <p className="text-xs text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span> on <span className="font-semibold text-[var(--ink)]">{booth}</span>.</p>
+                <p className="text-xs text-[var(--muted)]">Signed in as <span className="font-semibold text-[var(--ink)]">{staffName}</span> at <span className="font-semibold text-[var(--ink)]">{shopId}</span> / <span className="font-semibold text-[var(--ink)]">{booth}</span>.</p>
                 <p className="text-[11px] text-[var(--muted)] mt-1">This device is locked to its booth. Use Change Booth only when reassigning this machine.</p>
               </div>
               <div className="flex items-center gap-2">
@@ -944,7 +1041,7 @@ export default function POSPage() {
       <div className="min-h-screen bg-[var(--paper)] flex flex-col">
         <header className="bg-[var(--ink)] text-white px-4 py-3 flex items-center gap-3">
           <button onClick={() => setScreen('pos')} className="text-white/60 hover:text-white text-sm px-3 py-1.5 rounded-lg border border-white/20 tap-scale">← Back</button>
-          <span className="font-display text-lg flex-1 text-center">{booth} · {staffName}</span>
+          <span className="font-display text-lg flex-1 text-center">{shopId} · {booth} · {staffName}</span>
           <div className="w-16" />
         </header>
 
@@ -1092,7 +1189,7 @@ export default function POSPage() {
       {/* ── HEADER ── */}
       <header className="bg-[var(--ink)] text-white px-3 py-2.5 flex items-center gap-2 shrink-0">
         <div className="flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm font-semibold">
-          🏷️ <span className="font-display">{booth}</span>
+          🏷️ <span className="font-display">{shopId} / {booth}</span>
         </div>
 
         <div className="flex-1 text-center font-display text-sm tracking-wide opacity-60">{staffName}</div>

@@ -2,6 +2,7 @@ import { Transaction, CashReport } from './supabase'
 
 const OFFLINE_SALES_KEY = 'pos_offline_sales'
 const BOOTH_KEY = 'pos_booth_location'
+const SHOP_ID_KEY = 'pos_shop_id'
 const STAFF_NAME_KEY = 'pos_staff_name'
 const ADMIN_PIN_KEY = 'pos_admin_pin'
 
@@ -13,6 +14,19 @@ export function getStoredBoothLocation(): string | null {
 export function getBoothLocation(): string {
   if (typeof window === 'undefined') return 'Booth_A'
   return localStorage.getItem(BOOTH_KEY) || 'Booth_A'
+}
+
+export function getStoredShopId(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem(SHOP_ID_KEY)
+}
+
+export function setShopId(shopId: string) {
+  localStorage.setItem(SHOP_ID_KEY, shopId)
+}
+
+export function clearShopId() {
+  localStorage.removeItem(SHOP_ID_KEY)
 }
 
 export function setBoothLocation(booth: string) {
@@ -34,6 +48,7 @@ export function setStaffName(name: string) {
 
 export function clearStaffSession() {
   localStorage.removeItem(STAFF_NAME_KEY)
+  localStorage.removeItem(SHOP_ID_KEY)
 }
 
 export function getAdminPin(): string {

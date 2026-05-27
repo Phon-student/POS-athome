@@ -9,6 +9,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json()) as Database['public']['Tables']['cash_reports']['Insert']
+  if (!body.shop_id) {
+    return NextResponse.json({ error: 'Missing required field: shop_id' }, { status: 400 })
+  }
 
   const { data, error } = await supabase
     .from('cash_reports')
@@ -28,7 +31,11 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
+  const shopId = searchParams.get('shop_id')
   const booth = searchParams.get('booth')
+  if (!shopId) {
+    return NextResponse.json({ error: 'Missing required query param: shop_id' }, { status: 400 })
+  }
   if (!booth) {
     return NextResponse.json({ error: 'Missing required query param: booth' }, { status: 400 })
   }
@@ -40,6 +47,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from('cash_reports')
     .select('*')
+    .eq('shop_id', shopId)
     .eq('booth_location', booth)
     .eq('report_type', type)
     .order('created_at', { ascending: false })

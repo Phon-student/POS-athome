@@ -89,6 +89,7 @@ export function getSupabaseConfigErrorMessage() {
 
 export type Product = {
   id: string
+  shop_id: string
   name: string
   price: number
   category: string
@@ -102,6 +103,7 @@ export type CartItem = {
 export type Transaction = {
   id?: number
   created_at?: string
+  shop_id: string
   booth_location: string
   payment_method: 'PromptPay' | 'Cash'
   subtotal: number
@@ -112,6 +114,7 @@ export type Transaction = {
 }
 
 export type CashReport = {
+  shop_id: string
   booth_location: string
   report_type: 'OPENING' | 'CLOSING'
   total_value: number

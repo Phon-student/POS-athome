@@ -9,6 +9,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json()) as Database['public']['Tables']['transactions']['Insert']
+  if (!body.shop_id) {
+    return NextResponse.json({ error: 'Missing required field: shop_id' }, { status: 400 })
+  }
 
   const { data, error } = await supabase
     .from('transactions')
@@ -27,10 +30,15 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
+  const shopId = searchParams.get('shop_id')
   const booth = searchParams.get('booth')
   const paymentMethod = searchParams.get('payment_method')
   const start = searchParams.get('start')
   const end = searchParams.get('end')
+
+  if (!shopId) {
+    return NextResponse.json({ error: 'Missing required query param: shop_id' }, { status: 400 })
+  }
 
   if (!booth) {
     return NextResponse.json({ error: 'Missing required query param: booth' }, { status: 400 })
@@ -39,6 +47,7 @@ export async function GET(req: NextRequest) {
   let query = supabase
     .from('transactions')
     .select('total_amount')
+    .eq('shop_id', shopId)
     .eq('booth_location', booth)
 
   if (paymentMethod === 'Cash' || paymentMethod === 'PromptPay') {

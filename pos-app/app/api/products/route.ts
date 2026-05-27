@@ -9,7 +9,18 @@ const NO_STORE_HEADERS = {
   Expires: '0',
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url)
+  const shopId = searchParams.get('shop_id')
+  if (!shopId) {
+    return NextResponse.json([], {
+      headers: {
+        ...NO_STORE_HEADERS,
+        'x-pos-warning': 'Missing required query param: shop_id',
+      },
+    })
+  }
+
   const supabase = getSupabaseServerClient()
   if (!supabase) {
     return NextResponse.json([], {
@@ -23,6 +34,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from('products')
     .select('*')
+    .eq('shop_id', shopId)
     .order('category')
 
   if (error) {
