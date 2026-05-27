@@ -18,6 +18,12 @@ type FloatType = 'OPENING' | 'CLOSING'
 type TransactionInsert = Database['public']['Tables']['transactions']['Insert']
 type CashReportInsert = Database['public']['Tables']['cash_reports']['Insert']
 type TransactionMetadata = TransactionInsert['metadata']
+type ClosingSummary = {
+  openingFloat: number | null
+  cashSales: number
+  expectedCash: number
+  transactionCount: number
+}
 
 const DENOMS = [
   { label: '+20',   value: 20,   color: 'bg-green-100 text-green-800 border-green-300' },
@@ -127,6 +133,15 @@ function parseCSV(text: string): Record<string, string>[] {
   })
 }
 
+function getLocalDayRange(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+  }
+}
+
 async function fetchSheetsData(url: string): Promise<{ products: Product[]; promo: PromoConfig | null }> {
   // Sheet 1 (gid=0) — Products: id, name, price, category
   const csvUrl1 = sheetsUrlToCsv(url, '0')
@@ -184,6 +199,9 @@ export default function POSPage() {
   const [screen, setScreen]         = useState<Screen>('pos')
   const [floatType, setFloatType]   = useState<FloatType>('OPENING')
   const [floatDenoms, setFloatDenoms] = useState<Record<string, number>>({})
+  const [closingSummary, setClosingSummary] = useState<ClosingSummary | null>(null)
+  const [closingSummaryLoading, setClosingSummaryLoading] = useState(false)
+  const [closingSummaryError, setClosingSummaryError] = useState('')
   const [toast, setToast]           = useState('')
   const [syncing, setSyncing]       = useState(false)
   const [importMsg, setImportMsg]   = useState('')
@@ -288,6 +306,56 @@ export default function POSPage() {
 
   // ── Float ────────────────────────────────────────────────
   const floatTotal = FLOAT_DENOMS.reduce((s, d) => s + (floatDenoms[d.key] || 0) * d.value, 0)
+  const variance = closingSummary ? floatTotal - closingSummary.expectedCash : null
+
+  const loadClosingSummary = useCallback(async () => {
+    setClosingSummaryLoading(true)
+    setClosingSummaryError('')
+
+    const { start, end } = getLocalDayRange()
+    const boothQuery = encodeURIComponent(booth)
+    const salesQuery = new URLSearchParams({
+      booth,
+      payment_method: 'Cash',
+      start,
+      end,
+    })
+
+    try {
+      const [openingRes, salesRes] = await Promise.all([
+        fetch(`/api/cash-report?booth=${boothQuery}&type=OPENING`),
+        fetch(`/api/record-sale?${salesQuery.toString()}`),
+      ])
+
+      let openingFloat: number | null = null
+      if (openingRes.ok) {
+        const openingData = await openingRes.json()
+        openingFloat = typeof openingData.total_value === 'number' ? openingData.total_value : null
+      } else if (openingRes.status !== 404) {
+        throw new Error('Could not load opening float')
+      }
+
+      if (!salesRes.ok) {
+        throw new Error('Could not load cash sales summary')
+      }
+
+      const salesData = await salesRes.json() as { total_amount?: number; transaction_count?: number }
+      const cashSales = typeof salesData.total_amount === 'number' ? salesData.total_amount : 0
+      const transactionCount = typeof salesData.transaction_count === 'number' ? salesData.transaction_count : 0
+
+      setClosingSummary({
+        openingFloat,
+        cashSales,
+        expectedCash: cashSales + (openingFloat ?? 0),
+        transactionCount,
+      })
+    } catch (error: unknown) {
+      setClosingSummary(null)
+      setClosingSummaryError(error instanceof Error ? error.message : 'Could not load closing summary')
+    }
+
+    setClosingSummaryLoading(false)
+  }, [booth])
   const submitFloat = async () => {
     const report: CashReportInsert = {
       booth_location: booth,
@@ -312,6 +380,11 @@ export default function POSPage() {
       showToast("✓ Loaded yesterday's closing count")
     } catch { showToast('No previous closing data found') }
   }
+
+  useEffect(() => {
+    if (screen !== 'float' || floatType !== 'CLOSING') return
+    loadClosingSummary().catch(() => {})
+  }, [floatType, loadClosingSummary, screen])
 
   // ── Import handlers ──────────────────────────────────────
   const handleSheetsImport = async () => {
@@ -559,6 +632,86 @@ export default function POSPage() {
               className="w-full mb-4 py-3 rounded-xl border-2 border-dashed border-[var(--accent)] text-[var(--accent)] text-sm font-semibold tap-scale hover:bg-[var(--accent-light)] transition-colors">
               📋 Autofill from Yesterday's Closing Count
             </button>
+          )}
+
+          {floatType === 'CLOSING' && (
+            <div className="mb-4 rounded-2xl border border-[var(--border)] bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg">End-of-Day Check</h3>
+                  <p className="text-xs text-[var(--muted)]">Expected cash from today's opening float and cash sales</p>
+                </div>
+                <button onClick={() => loadClosingSummary().catch(() => {})}
+                  className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-semibold tap-scale">
+                  Refresh
+                </button>
+              </div>
+
+              {closingSummaryLoading && (
+                <div className="text-sm text-[var(--muted)]">Loading closing summary…</div>
+              )}
+
+              {!closingSummaryLoading && closingSummaryError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {closingSummaryError}
+                </div>
+              )}
+
+              {!closingSummaryLoading && closingSummary && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-xl bg-[var(--paper)] px-3 py-2">
+                      <div className="text-[var(--muted)] text-xs mb-1">Opening Float</div>
+                      <div className="font-display text-xl">฿{(closingSummary.openingFloat ?? 0).toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-xl bg-[var(--paper)] px-3 py-2">
+                      <div className="text-[var(--muted)] text-xs mb-1">Cash Sales Today</div>
+                      <div className="font-display text-xl">฿{closingSummary.cashSales.toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-xl bg-[var(--paper)] px-3 py-2">
+                      <div className="text-[var(--muted)] text-xs mb-1">Expected Cash</div>
+                      <div className="font-display text-xl">฿{closingSummary.expectedCash.toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-xl bg-[var(--paper)] px-3 py-2">
+                      <div className="text-[var(--muted)] text-xs mb-1">Cash Transactions</div>
+                      <div className="font-display text-xl">{closingSummary.transactionCount}</div>
+                    </div>
+                  </div>
+
+                  <div className={`rounded-xl px-4 py-3 border ${
+                    variance === null
+                      ? 'border-[var(--border)] bg-[var(--paper)]'
+                      : variance === 0
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : variance > 0
+                          ? 'border-amber-200 bg-amber-50 text-amber-700'
+                          : 'border-red-200 bg-red-50 text-red-700'
+                  }`}>
+                    <div className="text-xs font-semibold uppercase tracking-wider mb-1">Variance</div>
+                    <div className="font-display text-2xl">
+                      {variance === null
+                        ? '—'
+                        : `${variance > 0 ? '+' : ''}฿${Math.abs(variance).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                    </div>
+                    <div className="text-xs mt-1">
+                      Counted cash of ฿{floatTotal.toLocaleString()} against expected cash of ฿{closingSummary.expectedCash.toLocaleString()}
+                    </div>
+                  </div>
+
+                  {closingSummary.openingFloat === null && (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                      No opening float report found for this booth today. Expected cash currently excludes opening float.
+                    </div>
+                  )}
+
+                  {offlineCount > 0 && (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                      {offlineCount} offline sale{offlineCount === 1 ? '' : 's'} pending sync. Expected cash may be understated until they are synced.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           <div className="space-y-3 mb-6">
