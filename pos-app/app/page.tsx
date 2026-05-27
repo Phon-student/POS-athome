@@ -56,10 +56,31 @@ type PromoConfig = {
 
 const DEFAULT_PROMO: PromoConfig = { comboDiscount: 30, bulkQty: 3, bulkDiscount: 50 }
 
+function isProduct(value: unknown): value is Product {
+  if (!value || typeof value !== 'object') return false
+
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.price === 'number' &&
+    typeof candidate.category === 'string'
+  )
+}
+
+function isProductArray(value: unknown): value is Product[] {
+  return Array.isArray(value) && value.every(isProduct)
+}
+
 // ── Persistence helpers ───────────────────────────────────────
 function loadLocalProducts(): Product[] | null {
   if (typeof window === 'undefined') return null
-  try { return JSON.parse(localStorage.getItem(LOCAL_PRODUCTS_KEY) || 'null') } catch { return null }
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(LOCAL_PRODUCTS_KEY) || 'null')
+    return isProductArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 function saveLocalProducts(p: Product[]) {
   localStorage.setItem(LOCAL_PRODUCTS_KEY, JSON.stringify(p))
@@ -220,10 +241,22 @@ export default function POSPage() {
     if (local && local.length > 0) {
       setProducts(local)
     } else {
-      fetch('/api/products').then(r => r.json()).then((data: Product[]) => {
-        setProducts(data)
-        saveLocalProducts(data)
-      }).catch(() => {})
+      fetch('/api/products')
+        .then(async r => {
+          const payload: unknown = await r.json().catch(() => null)
+          if (!r.ok || !isProductArray(payload)) {
+            throw new Error('Could not load products')
+          }
+          return payload
+        })
+        .then((data: Product[]) => {
+          setProducts(data)
+          saveLocalProducts(data)
+        })
+        .catch(() => {
+          setProducts([])
+          showToast('Could not load products. Import a menu or check the products API.')
+        })
     }
   }, [])
 

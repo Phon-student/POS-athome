@@ -4,7 +4,11 @@ import { getSupabaseConfigErrorMessage, getSupabaseServerClient } from '@/lib/su
 export async function GET() {
   const supabase = getSupabaseServerClient()
   if (!supabase) {
-    return NextResponse.json({ error: getSupabaseConfigErrorMessage() }, { status: 500 })
+    return NextResponse.json([], {
+      headers: {
+        'x-pos-warning': getSupabaseConfigErrorMessage(),
+      },
+    })
   }
 
   const { data, error } = await supabase
