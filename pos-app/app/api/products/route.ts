@@ -1,11 +1,20 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseConfigErrorMessage, getSupabaseServerClient } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  Pragma: 'no-cache',
+  Expires: '0',
+}
+
 export async function GET() {
   const supabase = getSupabaseServerClient()
   if (!supabase) {
     return NextResponse.json([], {
       headers: {
+        ...NO_STORE_HEADERS,
         'x-pos-warning': getSupabaseConfigErrorMessage(),
       },
     })
@@ -20,10 +29,13 @@ export async function GET() {
     console.error('Failed to load products from Supabase:', error)
     return NextResponse.json([], {
       headers: {
+        ...NO_STORE_HEADERS,
         'x-pos-warning': `Supabase products query failed: ${error.message}`,
       },
     })
   }
 
-  return NextResponse.json(data ?? [])
+  return NextResponse.json(data ?? [], {
+    headers: NO_STORE_HEADERS,
+  })
 }

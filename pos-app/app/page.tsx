@@ -258,11 +258,12 @@ export default function POSPage() {
       if (storedBooth) {
         setBooth(storedBooth)
         setSessionStep('ready')
-      } else if (adminPinExists) {
-        setSessionStep('staff')
-        setAdminPinTarget('boothSetup')
       } else {
-        setSessionStep('adminSetup')
+        if (adminPinExists) {
+          setSessionStep('booth')
+        } else {
+          setSessionStep('adminSetup')
+        }
       }
     } else {
       setSessionStep('staff')
@@ -277,7 +278,7 @@ export default function POSPage() {
     if (local && local.length > 0) {
       setProducts(local)
     } else {
-      fetch('/api/products')
+      fetch('/api/products', { cache: 'no-store' })
         .then(async r => {
           const payload: unknown = await r.json().catch(() => null)
           if (!r.ok || !isProductArray(payload)) {
@@ -319,7 +320,7 @@ export default function POSPage() {
         setBooth(storedBooth)
         setSessionStep('ready')
       } else {
-        setAdminPinTarget('boothSetup')
+        setSessionStep('booth')
       }
     } else {
       setSessionStep('adminSetup')
