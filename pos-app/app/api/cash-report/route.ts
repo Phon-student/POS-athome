@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseServerClient } from '@/lib/supabase'
+import { getSupabaseConfigErrorMessage, getSupabaseServerClient } from '@/lib/supabase'
+import type { Database } from '@/lib/supabase'
 
 export async function POST(req: NextRequest) {
   const supabase = getSupabaseServerClient()
   if (!supabase) {
-    return NextResponse.json(
-      { error: 'Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: getSupabaseConfigErrorMessage() }, { status: 500 })
   }
 
-  const body = await req.json()
+  const body = (await req.json()) as Database['public']['Tables']['cash_reports']['Insert']
 
   const { data, error } = await supabase
     .from('cash_reports')
-    .insert([body])
+    .insert(body)
     .select()
     .single()
 
@@ -26,10 +24,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const supabase = getSupabaseServerClient()
   if (!supabase) {
-    return NextResponse.json(
-      { error: 'Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: getSupabaseConfigErrorMessage() }, { status: 500 })
   }
 
   const { searchParams } = new URL(req.url)

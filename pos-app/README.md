@@ -79,6 +79,8 @@ INSERT INTO public.products (id, name, price, category) VALUES
 
 | Key | Value |
 |-----|-------|
+| `SUPABASE_URL` | `https://xxxxx.supabase.co` |
+| `SUPABASE_ANON_KEY` | `eyJ...your anon key` |
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://xxxxx.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `eyJ...your anon key` |
 
